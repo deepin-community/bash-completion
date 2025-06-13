@@ -1,11 +1,12 @@
-import pexpect
+import pexpect  # type: ignore[import]
 import pytest
 
 from conftest import PS1, TestUnitBase, assert_bash_exec
 
 
 @pytest.mark.bashcomp(
-    cmd=None, ignore_env=r"^[+-](COMP_(WORDS|CWORD|LINE|POINT)|_scp_path_esc)="
+    cmd=None,
+    ignore_env=r"^[+-](COMP_(WORDS|CWORD|LINE|POINT)|_comp_cmd_scp__path_esc)=",
 )
 class TestUnitGetCword(TestUnitBase):
     def _test(self, *args, **kwargs):
@@ -49,12 +50,12 @@ class TestUnitGetCword(TestUnitBase):
         assert output == r"b\ c"
 
     def test_8(self, bash):
-        r"""a b\| c should return b\ """
+        r"""a b\| c should return b\ """  # fmt: skip
         output = self._test(bash, r"(a 'b\ c')", 1, r"a b\ c", 4)
         assert output == "b\\"
 
     def test_9(self, bash):
-        r"""a "b\| should return "b\ """
+        r"""a "b\| should return "b\ """  # fmt: skip
         output = self._test(bash, "(a '\"b\\')", 1, r"a \"b\\", 5)
         assert output == '"b\\'
 
@@ -103,7 +104,7 @@ class TestUnitGetCword(TestUnitBase):
         a -n| should return -n
 
         This test makes sure `_get_cword' doesn't use `echo' to return its
-        value, because -n might be interpreted by `echo' and thus woud not
+        value, because -n might be interpreted by `echo' and thus would not
         be returned.
         """
         output = self._test(bash, "(a -n)", 1, "a -n", 4)
@@ -152,3 +153,12 @@ class TestUnitGetCword(TestUnitBase):
             ]
         )
         assert got == 1
+
+    def test_25(self, bash):
+        """
+        a b c:| with trailing whitespace after the caret (no more words) and
+        with WORDBREAKS -= : should return c:
+        """
+        assert_bash_exec(bash, "add_comp_wordbreak_char :")
+        output = self._test(bash, "(a b c :)", 3, "a b c: ", 6, arg=":")
+        assert output == "c:"

@@ -5,7 +5,8 @@ bash-completion for Debian
 
  If a package installs its completion files under /etc/bash_completion.d/,
  bash-completion is still able to use them, but bash-completion itself does
- not install any files under that directory.
+ not install any completion files under that directory. It does install a
+ consolidated compatibility/deprecation file: 000_bash_completion_compat.bash
 
  If you are a package maintainer, you are encouraged to use
  dh_bash-completion(1), which will take care of installing third-party

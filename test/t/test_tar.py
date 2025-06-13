@@ -5,7 +5,7 @@ import pytest
 from conftest import assert_bash_exec
 
 
-@pytest.mark.bashcomp(ignore_env=r"^-declare -f _tar$")
+@pytest.mark.bashcomp(ignore_env=r"^-declare -f _comp_cmd_tar$")
 class TestTar:
     @pytest.fixture(scope="class")
     def gnu_tar(self, bash):
@@ -13,8 +13,8 @@ class TestTar:
         if not re.search(r"\bGNU ", got):
             pytest.skip("Not GNU tar")
 
-    @pytest.mark.complete("tar ")
-    def test_1(self, completion):
+    @pytest.mark.complete("tar ", shopt=dict(failglob=True))
+    def test_1(self, bash, completion):
         assert completion
 
     # Test "f" when mode is not as first option
@@ -116,5 +116,20 @@ class TestTar:
     def test_22(self, bash, completion):
         """Test listing escaped chars in old option."""
         assert completion == "c/"
+
+    # Test long options (gnu style)
+    @pytest.mark.complete("tar --create --file created.tar ", cwd="tar")
+    def test_23(self, completion):
+        assert completion == "archive.tar.xz dir/ dir2/ escape.tar".split()
+
+    # Test detection of file type by extension, J is for .xz
+    @pytest.mark.complete("tar xJf ", cwd="tar")
+    def test_24(self, completion):
+        assert completion == "archive.tar.xz dir/ dir2/".split()
+
+    # Test compression detection of gnu style options
+    @pytest.mark.complete("tar --extract --xz --file ", cwd="tar")
+    def test_25(self, completion):
+        assert completion == "archive.tar.xz dir/ dir2/".split()
 
     # TODO: "tar tf escape.tar a/b"

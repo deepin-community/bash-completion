@@ -21,6 +21,7 @@ EXTRA_DIST = \
 	test_apt_build.py \
 	test_apt_cache.py \
 	test_apt_get.py \
+	test_apt_mark.py \
 	test_aptitude.py \
 	test_arch.py \
 	test_arp.py \
@@ -36,8 +37,10 @@ EXTRA_DIST = \
 	test_autoscan.py \
 	test_autossh.py \
 	test_autoupdate.py \
+	test_avahi_browse.py \
 	test_avctrl.py \
 	test_awk.py \
+	test_b2sum.py \
 	test_badblocks.py \
 	test_base64.py \
 	test_bash.py \
@@ -47,6 +50,7 @@ EXTRA_DIST = \
 	test_bk.py \
 	test_bmake.py \
 	test_brctl.py \
+	test_bsdtar.py \
 	test_btdownloadcurses_py.py \
 	test_btdownloadgui_py.py \
 	test_btdownloadheadless_py.py \
@@ -69,6 +73,7 @@ EXTRA_DIST = \
 	test_check_db.py \
 	test_check_perms.py \
 	test_checksec.py \
+	test_chflags.py \
 	test_chfn.py \
 	test_chgrp.py \
 	test_chkconfig.py \
@@ -173,6 +178,10 @@ EXTRA_DIST = \
 	test_flake8.py \
 	test_fmt.py \
 	test_fold.py \
+	test_fprintd_delete.py \
+	test_fprintd_enroll.py \
+	test_fprintd_list.py \
+	test_fprintd_verify.py \
 	test_freebsd_update.py \
 	test_freeciv.py \
 	test_freeciv_server.py \
@@ -214,13 +223,16 @@ EXTRA_DIST = \
 	test_growisofs.py \
 	test_grpck.py \
 	test_grub.py \
+	test_gssdp_device_sniffer.py \
 	test_gssdp_discover.py \
 	test_gzip.py \
+	test_hash.py \
 	test_hciattach.py \
 	test_hciconfig.py \
 	test_hcitool.py \
 	test_hddtemp.py \
 	test_head.py \
+	test_help.py \
 	test_hexdump.py \
 	test_hid2hci.py \
 	test_host.py \
@@ -253,6 +265,7 @@ EXTRA_DIST = \
 	test_ip.py \
 	test_ipcalc.py \
 	test_iperf.py \
+	test_iperf3.py \
 	test_ipmitool.py \
 	test_ipsec.py \
 	test_iptables.py \
@@ -360,6 +373,7 @@ EXTRA_DIST = \
 	test_mdtool.py \
 	test_medusa.py \
 	test_mencoder.py \
+	test_mfiutil.py \
 	test_mii_diag.py \
 	test_mii_tool.py \
 	test_minicom.py \
@@ -382,6 +396,7 @@ EXTRA_DIST = \
 	test_mr.py \
 	test_msgsnarf.py \
 	test_msynctool.py \
+	test_mtr.py \
 	test_mtx.py \
 	test_munin_node_configure.py \
 	test_munin_run.py \
@@ -395,6 +410,7 @@ EXTRA_DIST = \
 	test_mysqladmin.py \
 	test_nc.py \
 	test_ncftp.py \
+	test_neomutt.py \
 	test_nethogs.py \
 	test_netstat.py \
 	test_newgrp.py \
@@ -413,7 +429,6 @@ EXTRA_DIST = \
 	test_objdump.py \
 	test_od.py \
 	test_oggdec.py \
-	test_op.py \
 	test_openssl.py \
 	test_opera.py \
 	test_optipng.py \
@@ -422,6 +437,7 @@ EXTRA_DIST = \
 	test_passwd.py \
 	test_paste.py \
 	test_patch.py \
+	test_pdftoppm.py \
 	test_pdftotext.py \
 	test_perl.py \
 	test_perlcritic.py \
@@ -439,6 +455,7 @@ EXTRA_DIST = \
 	test_pkg_get.py \
 	test_pkg_info.py \
 	test_pkgadd.py \
+	test_pkgconf.py \
 	test_pkgrm.py \
 	test_pkgtool.py \
 	test_pkgutil.py \
@@ -461,6 +478,7 @@ EXTRA_DIST = \
 	test_prelink.py \
 	test_printenv.py \
 	test_protoc.py \
+	test_ps.py \
 	test_psql.py \
 	test_ptx.py \
 	test_puppet.py \
@@ -483,11 +501,13 @@ EXTRA_DIST = \
 	test_pyflakes.py \
 	test_pylint.py \
 	test_pylint_3.py \
+	test_pyston.py \
 	test_pytest.py \
 	test_python.py \
 	test_python3.py \
 	test_pyvenv.py \
 	test_qemu.py \
+	test_qemu_system_x86_64.py \
 	test_qrunner.py \
 	test_querybts.py \
 	test_quota.py \
@@ -540,9 +560,14 @@ EXTRA_DIST = \
 	test_sftp.py \
 	test_sh.py \
 	test_sha1sum.py \
+	test_sha224sum.py \
+	test_sha256sum.py \
+	test_sha384sum.py \
+	test_sha512sum.py \
 	test_shar.py \
 	test_shellcheck.py \
 	test_sitecopy.py \
+	test_slabtop.py \
 	test_slackpkg.py \
 	test_slapt_get.py \
 	test_slapt_src.py \
@@ -564,6 +589,7 @@ EXTRA_DIST = \
 	test_ssh_add.py \
 	test_ssh_copy_id.py \
 	test_ssh_keygen.py \
+	test_ssh_keyscan.py \
 	test_sshfs.py \
 	test_sshmitm.py \
 	test_sshow.py \
@@ -600,6 +626,8 @@ EXTRA_DIST = \
 	test_tox.py \
 	test_tr.py \
 	test_tracepath.py \
+	test_tree.py \
+	test_truncate.py \
 	test_tshark.py \
 	test_tsig_keygen.py \
 	test_tune2fs.py \
@@ -663,6 +691,7 @@ EXTRA_DIST = \
 	test_wvdial.py \
 	test_xdg_mime.py \
 	test_xdg_settings.py \
+	test_xev.py \
 	test_xfreerdp.py \
 	test_xgamma.py \
 	test_xhost.py \
@@ -691,8 +720,14 @@ all:
 
 PYTEST = @PYTEST@
 
-check-local:
-	$(PYTEST) $(PYTESTFLAGS) $(srcdir)
+# Some tests require completions/ symlinks to be in place, which would be a
+# chore to achieve in the build dir with VPATH builds (well not the symlinks,
+# but the "main" files they target), e.g. "make distcheck". Therefore we test
+# the installed tree instead, which isn't a bad idea in the first place.
+installcheck-local:
+	ABS_TOP_BUILDDIR="$(abs_top_builddir)" \
+	BASH_COMPLETION_TEST_BASH_COMPLETION="$(DESTDIR)/$(pkgdatadir)/bash_completion" \
+		$(PYTEST) $(PYTESTFLAGS) $(srcdir)
 
 clean-local:
 	$(RM) -R __pycache__
