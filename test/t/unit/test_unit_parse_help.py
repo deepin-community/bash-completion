@@ -2,29 +2,29 @@
 
 import pytest
 
-from conftest import assert_bash_exec
+from conftest import assert_bash_exec, bash_env_saved
 
 
 @pytest.mark.bashcomp(cmd=None, ignore_env=r"^\+declare -f fn$")
 class TestUnitParseHelp:
     def test_1(self, bash):
         assert_bash_exec(bash, "fn() { echo; }")
-        output = assert_bash_exec(bash, "_parse_help fn")
+        output = assert_bash_exec(bash, "_parse_help fn; (($? == 1))")
         assert not output
 
     def test_2(self, bash):
         assert_bash_exec(bash, "fn() { echo 'no dashes here'; }")
-        output = assert_bash_exec(bash, "_parse_help fn")
+        output = assert_bash_exec(bash, "_parse_help fn; (($? == 1))")
         assert not output
 
     def test_3(self, bash):
         assert_bash_exec(bash, "fn() { echo 'internal-dash'; }")
-        output = assert_bash_exec(bash, "_parse_help fn")
+        output = assert_bash_exec(bash, "_parse_help fn; (($? == 1))")
         assert not output
 
     def test_4(self, bash):
         assert_bash_exec(bash, "fn() { echo 'no -leading-dashes'; }")
-        output = assert_bash_exec(bash, "_parse_help fn")
+        output = assert_bash_exec(bash, "_parse_help fn; (($? == 1))")
         assert not output
 
     def test_5(self, bash):
@@ -94,6 +94,20 @@ class TestUnitParseHelp:
         output = assert_bash_exec(bash, "_parse_help fn", want_output=True)
         assert output.split() == "--foo".split()
 
+    def test_17_failglob(self, bash):
+        assert_bash_exec(bash, "fn() { echo '--foo[=bar]'; }")
+        with bash_env_saved(bash) as bash_env:
+            bash_env.shopt("failglob", True)
+            output = assert_bash_exec(bash, "_parse_help fn", want_output=True)
+        assert output.split() == "--foo".split()
+
+    def test_17_nullglob(self, bash):
+        assert_bash_exec(bash, "fn() { echo '--foo[=bar]'; }")
+        with bash_env_saved(bash) as bash_env:
+            bash_env.shopt("nullglob", True)
+            output = assert_bash_exec(bash, "_parse_help fn", want_output=True)
+        assert output.split() == "--foo".split()
+
     def test_18(self, bash):
         assert_bash_exec(bash, "fn() { echo '--foo=<bar>'; }")
         output = assert_bash_exec(bash, "_parse_help fn", want_output=True)
@@ -144,6 +158,13 @@ class TestUnitParseHelp:
         output = assert_bash_exec(bash, "_parse_help fn", want_output=True)
         assert output.split() == "--foo".split()
 
+    def test_27_middle_dot(self, bash):
+        """We do not want to include the period at the end of the sentence but
+        want to include dots connecting names."""
+        assert_bash_exec(bash, "fn() { echo '--foo.bar.'; }")
+        output = assert_bash_exec(bash, "_parse_help fn", want_output=True)
+        assert output.split() == "--foo.bar".split()
+
     def test_28(self, bash):
         assert_bash_exec(bash, "fn() { echo '-f or --foo'; }")
         output = assert_bash_exec(bash, "_parse_help fn", want_output=True)
@@ -161,7 +182,7 @@ class TestUnitParseHelp:
         assert_bash_exec(
             bash, r"fn() { printf '%s\n' $'----\n---foo\n----- bar'; }"
         )
-        output = assert_bash_exec(bash, "_parse_help fn")
+        output = assert_bash_exec(bash, "_parse_help fn; (($? == 1))")
         assert not output
 
     def test_31(self, bash):
@@ -181,3 +202,33 @@ class TestUnitParseHelp:
         )
         output = assert_bash_exec(bash, "_parse_help fn", want_output=True)
         assert output.split() == "--exclude=".split()
+
+    def test_custom_helpopt1(self, bash):
+        assert_bash_exec(bash, "fn() { [[ $1 == -h ]] && echo '-option'; }")
+        output = assert_bash_exec(bash, "_parse_help fn -h", want_output=True)
+        assert output.split() == "-option".split()
+
+    def test_custom_helpopt2(self, bash):
+        assert_bash_exec(bash, "fn() { [[ $1 == '-?' ]] && echo '-option'; }")
+        output = assert_bash_exec(
+            bash, "_parse_help fn '-?'", want_output=True
+        )
+        assert output.split() == "-option".split()
+
+    def test_custom_helpopt2_failglob(self, bash):
+        assert_bash_exec(bash, "fn() { [[ $1 == '-?' ]] && echo '-option'; }")
+        with bash_env_saved(bash) as bash_env:
+            bash_env.shopt("failglob", True)
+            output = assert_bash_exec(
+                bash, "_parse_help fn '-?'", want_output=True
+            )
+        assert output.split() == "-option".split()
+
+    def test_custom_helpopt2_nullglob(self, bash):
+        assert_bash_exec(bash, "fn() { [[ $1 == '-?' ]] && echo '-option'; }")
+        with bash_env_saved(bash) as bash_env:
+            bash_env.shopt("nullglob", True)
+            output = assert_bash_exec(
+                bash, "_parse_help fn '-?'", want_output=True
+            )
+        assert output.split() == "-option".split()

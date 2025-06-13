@@ -1,0 +1,417 @@
+From: Gabriel F. T. Gomes <gabriel@inconstante.net.br>
+Subject: Add missing dependency on fixtures to help parallel testing
+Bug: https://github.com/scop/bash-completion/pull/1303
+
+When running the test suite with xdist and 'pytest -n <jobs>', several
+tests fail. This happens because, in these tests, the definition of the
+tested command, usually in a fixture method called 'functions' might
+happen only after the execution of the tests themselves, i.e. in the
+methods whose names start with 'test_'.
+
+This patch adds the missing dependency on these test-command-defining
+fixtures, so that they are executed before the tests themselves.
+
+Steps to reproduce:
+
+1. Make sure pytest-xdist is installed. On Debian systems this can be
+   verified with the following command:
+
+     dpkg --list python3-pytest-xdist
+
+2. Build and install bash-completion locally, for example with the
+   following commands:
+
+     autoreconf -f -i
+     ./configure --prefix=$PWD/install/
+     make install
+
+3. Run the test suite with a few parallel jobs, such as with:
+
+     export MYPATH=$PWD/install/share/bash-completion/bash_completion
+     BASH_COMPLETION_TEST_BASH_COMPLETION=$MYPATH \
+       pytest \
+         -n 8 \
+         test/t/unit/test_unit_count_args.py \
+         test/t/unit/test_unit_dequote.py \
+         test/t/unit/test_unit_get_first_arg.py \
+         test/t/unit/test_unit_quote.py
+     unset MYPATH
+
+Before this patch, these tests fail with messages similar to:
+
+  FAILED test/t/unit/test_unit_quote.py::TestUnitQuote::test_3 -
+  AssertionError: Error running "__tester "  a "": exit status=127, output="
+
+After this patch, all these tests, which previously failed, pass.
+---
+ test/t/unit/test_unit_count_args.py    | 24 +++++------
+ test/t/unit/test_unit_dequote.py       | 57 ++++++++++++++------------
+ test/t/unit/test_unit_get_first_arg.py | 10 ++---
+ test/t/unit/test_unit_quote.py         | 13 +++---
+ 4 files changed, 55 insertions(+), 49 deletions(-)
+
+diff --git a/test/t/unit/test_unit_count_args.py b/test/t/unit/test_unit_count_args.py
+index 7b018e48..66210436 100644
+--- a/test/t/unit/test_unit_count_args.py
++++ b/test/t/unit/test_unit_count_args.py
+@@ -76,38 +76,38 @@ class TestUnitCountArgs(TestUnitBase):
+         )
+         assert output == "3"
+ 
+-    def test_10_single_hyphen_1(self, bash):
++    def test_10_single_hyphen_1(self, bash, functions):
+         """- should be counted as an argument representing stdout/stdin"""
+         output = self._test(bash, "(a -b - c -d e)", 5, "a -b - c -d e", 12)
+         assert output == "3"
+ 
+-    def test_10_single_hyphen_2(self, bash):
++    def test_10_single_hyphen_2(self, bash, functions):
+         """- in an option argument should be skipped"""
+         output = self._test(
+             bash, "(a -b - c - e)", 5, "a -b - c - e", 11, arg='-a "-b"'
+         )
+         assert output == "3"
+ 
+-    def test_11_double_hyphen_1(self, bash):
++    def test_11_double_hyphen_1(self, bash, functions):
+         """all the words after -- should be counted"""
+         output = self._test(
+             bash, "(a -b -- -c -d e)", 5, "a -b -- -c -d e", 14
+         )
+         assert output == "3"
+ 
+-    def test_11_double_hyphen_2(self, bash):
++    def test_11_double_hyphen_2(self, bash, functions):
+         """all the words after -- should be counted"""
+         output = self._test(bash, "(a b -- -c -d e)", 5, "a b -- -c -d e", 13)
+         assert output == "4"
+ 
+-    def test_12_exclude_optarg_1(self, bash):
++    def test_12_exclude_optarg_1(self, bash, functions):
+         """an option argument should be skipped even if it matches the argument pattern"""
+         output = self._test(
+             bash, "(a -o -x b c)", 4, "a -o -x b c", 10, arg='-a "-o" -i "-x"'
+         )
+         assert output == "2"
+ 
+-    def test_12_exclude_optarg_2(self, bash):
++    def test_12_exclude_optarg_2(self, bash, functions):
+         """an option argument should be skipped even if it matches the argument pattern"""
+         output = self._test(
+             bash,
+@@ -119,7 +119,7 @@ class TestUnitCountArgs(TestUnitBase):
+         )
+         assert output == "2"
+ 
+-    def test_12_exclude_optarg_3(self, bash):
++    def test_12_exclude_optarg_3(self, bash, functions):
+         """an option argument should be skipped even if it matches the argument pattern"""
+         output = self._test(
+             bash,
+@@ -131,21 +131,21 @@ class TestUnitCountArgs(TestUnitBase):
+         )
+         assert output == "1"
+ 
+-    def test_13_plus_option_optarg(self, bash):
++    def test_13_plus_option_optarg(self, bash, functions):
+         """When +o is specified to be an option taking an option argument, it should not be counted as an argument"""
+         output = self._test(
+             bash, "(a +o b c)", 3, "a +o b c", 7, arg='-a "+o"'
+         )
+         assert output == "1"
+ 
+-    def test_14_no_optarg_chain_1(self, bash):
++    def test_14_no_optarg_chain_1(self, bash, functions):
+         """an option argument should not take another option argument"""
+         output = self._test(
+             bash, "(a -o -o -o -o c)", 5, "a -o -o -o -o c", 14, arg='-a "-o"'
+         )
+         assert output == "1"
+ 
+-    def test_14_no_optarg_chain_2(self, bash):
++    def test_14_no_optarg_chain_2(self, bash, functions):
+         """an option argument should not take another option argument"""
+         output = self._test(
+             bash,
+@@ -157,14 +157,14 @@ class TestUnitCountArgs(TestUnitBase):
+         )
+         assert output == "2"
+ 
+-    def test_15_double_hyphen_optarg(self, bash):
++    def test_15_double_hyphen_optarg(self, bash, functions):
+         """-- should lose its meaning when it is an option argument"""
+         output = self._test(
+             bash, "(a -o -- -b -c d)", 5, "a -o -- -b -c d", 14, arg='-a "-o"'
+         )
+         assert output == "1"
+ 
+-    def test_16_empty_word(self, bash):
++    def test_16_empty_word(self, bash, functions):
+         """An empty word should not take an option argument"""
+         output = self._test(bash, "(a '' x '' y d)", 5, "a  x  y d", 8)
+         assert output == "5"
+diff --git a/test/t/unit/test_unit_dequote.py b/test/t/unit/test_unit_dequote.py
+index 1c8a0f10..117a4877 100644
+--- a/test/t/unit/test_unit_dequote.py
++++ b/test/t/unit/test_unit_dequote.py
+@@ -9,123 +9,126 @@ from conftest import assert_bash_exec, bash_env_saved
+     ignore_env=r"^\+declare -f __tester$",
+ )
+ class TestDequote:
+-    def test_1_char(self, bash):
++    @pytest.fixture
++    def functions(self, bash):
+         assert_bash_exec(
+             bash,
+             '__tester() { local REPLY=dummy v=var;_comp_dequote "$1";local ext=$?;((${#REPLY[@]}))&&printf \'<%s>\' "${REPLY[@]}";echo;return $ext;}',
+         )
++
++    def test_1_char(self, bash, functions):
+         output = assert_bash_exec(bash, "__tester a", want_output=True)
+         assert output.strip() == "<a>"
+ 
+-    def test_2_str(self, bash):
++    def test_2_str(self, bash, functions):
+         output = assert_bash_exec(bash, "__tester abc", want_output=True)
+         assert output.strip() == "<abc>"
+ 
+-    def test_3_null(self, bash):
++    def test_3_null(self, bash, functions):
+         output = assert_bash_exec(bash, "__tester ''", want_output=True)
+         assert output.strip() == ""
+ 
+-    def test_4_empty(self, bash):
++    def test_4_empty(self, bash, functions):
+         output = assert_bash_exec(bash, "__tester \"''\"", want_output=True)
+         assert output.strip() == "<>"
+ 
+-    def test_5_brace(self, bash):
++    def test_5_brace(self, bash, functions):
+         output = assert_bash_exec(bash, "__tester 'a{1..3}'", want_output=True)
+         assert output.strip() == "<a1><a2><a3>"
+ 
+-    def test_6_glob(self, bash):
++    def test_6_glob(self, bash, functions):
+         output = assert_bash_exec(bash, "__tester 'a?b'", want_output=True)
+         assert output.strip() == "<a b><a$b><a&b><a'b>"
+ 
+-    def test_7_quote_1(self, bash):
++    def test_7_quote_1(self, bash, functions):
+         output = assert_bash_exec(
+             bash, "__tester '\"a\"'\\'b\\'\\$\\'c\\'", want_output=True
+         )
+         assert output.strip() == "<abc>"
+ 
+-    def test_7_quote_2(self, bash):
++    def test_7_quote_2(self, bash, functions):
+         output = assert_bash_exec(
+             bash, "__tester '\\\"\\'\\''\\$\\`'", want_output=True
+         )
+         assert output.strip() == "<\"'$`>"
+ 
+-    def test_7_quote_3(self, bash):
++    def test_7_quote_3(self, bash, functions):
+         output = assert_bash_exec(
+             bash, "__tester \\$\\'a\\\\tb\\'", want_output=True
+         )
+         assert output.strip() == "<a\tb>"
+ 
+-    def test_7_quote_4(self, bash):
++    def test_7_quote_4(self, bash, functions):
+         output = assert_bash_exec(
+             bash, '__tester \'"abc\\"def"\'', want_output=True
+         )
+         assert output.strip() == '<abc"def>'
+ 
+-    def test_7_quote_5(self, bash):
++    def test_7_quote_5(self, bash, functions):
+         output = assert_bash_exec(
+             bash, "__tester \\'abc\\'\\\\\\'\\'def\\'", want_output=True
+         )
+         assert output.strip() == "<abc'def>"
+ 
+-    def test_8_param_1(self, bash):
++    def test_8_param_1(self, bash, functions):
+         output = assert_bash_exec(bash, "__tester '$v'", want_output=True)
+         assert output.strip() == "<var>"
+ 
+-    def test_8_param_2(self, bash):
++    def test_8_param_2(self, bash, functions):
+         output = assert_bash_exec(bash, "__tester '${v}'", want_output=True)
+         assert output.strip() == "<var>"
+ 
+-    def test_8_param_3(self, bash):
++    def test_8_param_3(self, bash, functions):
+         output = assert_bash_exec(bash, "__tester '${#v}'", want_output=True)
+         assert output.strip() == "<3>"
+ 
+-    def test_8_param_4(self, bash):
++    def test_8_param_4(self, bash, functions):
+         output = assert_bash_exec(bash, "__tester '${v[0]}'", want_output=True)
+         assert output.strip() == "<var>"
+ 
+-    def test_9_qparam_1(self, bash):
++    def test_9_qparam_1(self, bash, functions):
+         output = assert_bash_exec(bash, "__tester '\"$v\"'", want_output=True)
+         assert output.strip() == "<var>"
+ 
+-    def test_9_qparam_2(self, bash):
++    def test_9_qparam_2(self, bash, functions):
+         output = assert_bash_exec(
+             bash, "__tester '\"${v[@]}\"'", want_output=True
+         )
+         assert output.strip() == "<var>"
+ 
+-    def test_10_pparam_1(self, bash):
++    def test_10_pparam_1(self, bash, functions):
+         output = assert_bash_exec(bash, "__tester '$?'", want_output=True)
+         assert output.strip() == "<0>"
+ 
+-    def test_10_pparam_2(self, bash):
++    def test_10_pparam_2(self, bash, functions):
+         output = assert_bash_exec(bash, "__tester '${#1}'", want_output=True)
+         assert output.strip() == "<5>"  # The string `${#1}` is five characters
+ 
+-    def test_unsafe_1(self, bash):
++    def test_unsafe_1(self, bash, functions):
+         output = assert_bash_exec(
+             bash, "! __tester '$(echo hello >&2)'", want_output=True
+         )
+         assert output.strip() == ""
+ 
+-    def test_unsafe_2(self, bash):
++    def test_unsafe_2(self, bash, functions):
+         output = assert_bash_exec(
+             bash, "! __tester '|echo hello >&2'", want_output=True
+         )
+         assert output.strip() == ""
+ 
+-    def test_unsafe_3(self, bash):
++    def test_unsafe_3(self, bash, functions):
+         output = assert_bash_exec(
+             bash, "! __tester '>| important_file.txt'", want_output=True
+         )
+         assert output.strip() == ""
+ 
+-    def test_unsafe_4(self, bash):
++    def test_unsafe_4(self, bash, functions):
+         output = assert_bash_exec(
+             bash, "! __tester '`echo hello >&2`'", want_output=True
+         )
+         assert output.strip() == ""
+ 
+-    def test_glob_default(self, bash):
++    def test_glob_default(self, bash, functions):
+         with bash_env_saved(bash) as bash_env:
+             bash_env.shopt("failglob", False)
+             bash_env.shopt("nullglob", False)
+@@ -134,7 +137,7 @@ class TestDequote:
+             )
+             assert output.strip() == "<non-existent-*.txt>"
+ 
+-    def test_glob_noglob(self, bash):
++    def test_glob_noglob(self, bash, functions):
+         with bash_env_saved(bash) as bash_env:
+             bash_env.set("noglob", True)
+             output = assert_bash_exec(
+@@ -144,7 +147,7 @@ class TestDequote:
+             )
+             assert output.strip() == "<non-existent-*.txt>"
+ 
+-    def test_glob_failglob(self, bash):
++    def test_glob_failglob(self, bash, functions):
+         with bash_env_saved(bash) as bash_env:
+             bash_env.shopt("failglob", True)
+             output = assert_bash_exec(
+@@ -152,7 +155,7 @@ class TestDequote:
+             )
+             assert output.strip() == ""
+ 
+-    def test_glob_nullglob(self, bash):
++    def test_glob_nullglob(self, bash, functions):
+         with bash_env_saved(bash) as bash_env:
+             bash_env.shopt("failglob", False)
+             bash_env.shopt("nullglob", True)
+diff --git a/test/t/unit/test_unit_get_first_arg.py b/test/t/unit/test_unit_get_first_arg.py
+index 415e2178..823ee413 100644
+--- a/test/t/unit/test_unit_get_first_arg.py
++++ b/test/t/unit/test_unit_get_first_arg.py
+@@ -69,22 +69,22 @@ class TestUnitGetFirstArg:
+         output = self._test(bash, "(a -b --foo d e f)", 5, '-a "@(-c|--foo)"')
+         assert output == "e"
+ 
+-    def test_9_skip_optarg_3(self, bash):
++    def test_9_skip_optarg_3(self, bash, functions):
+         output = self._test(bash, "(a -b - c d e)", 5, '-a "-b"')
+         assert output == "c"
+ 
+-    def test_9_skip_optarg_4(self, bash):
++    def test_9_skip_optarg_4(self, bash, functions):
+         output = self._test(bash, "(a -b -c d e f)", 5, '-a "-[bc]"')
+         assert output == "d"
+ 
+-    def test_9_skip_optarg_5(self, bash):
++    def test_9_skip_optarg_5(self, bash, functions):
+         output = self._test(bash, "(a +o b c d)", 4, '-a "+o"')
+         assert output == "c"
+ 
+-    def test_9_skip_optarg_6(self, bash):
++    def test_9_skip_optarg_6(self, bash, functions):
+         output = self._test(bash, "(a -o -o -o -o b c)", 6, '-a "-o"')
+         assert output == "b"
+ 
+-    def test_9_skip_optarg_7(self, bash):
++    def test_9_skip_optarg_7(self, bash, functions):
+         output = self._test(bash, "(a -o -- -b -c d e)", 6, '-a "-o"')
+         assert output == "d"
+diff --git a/test/t/unit/test_unit_quote.py b/test/t/unit/test_unit_quote.py
+index 35087825..fb621ac9 100644
+--- a/test/t/unit/test_unit_quote.py
++++ b/test/t/unit/test_unit_quote.py
+@@ -8,35 +8,38 @@ from conftest import TestUnitBase, assert_bash_exec
+     ignore_env=r"^\+declare -f __tester$",
+ )
+ class TestUnitQuote(TestUnitBase):
+-    def test_1(self, bash):
++    @pytest.fixture
++    def functions(self, bash):
+         assert_bash_exec(
+             bash,
+             '__tester() { local REPLY; _comp_quote "$1"; printf %s "$REPLY"; }',
+         )
++
++    def test_1(self, bash, functions):
+         output = assert_bash_exec(
+             bash, '__tester "a b"', want_output=True, want_newline=False
+         )
+         assert output.strip() == "'a b'"
+ 
+-    def test_2(self, bash):
++    def test_2(self, bash, functions):
+         output = assert_bash_exec(
+             bash, '__tester "a  b"', want_output=True, want_newline=False
+         )
+         assert output.strip() == "'a  b'"
+ 
+-    def test_3(self, bash):
++    def test_3(self, bash, functions):
+         output = assert_bash_exec(
+             bash, '__tester "  a "', want_output=True, want_newline=False
+         )
+         assert output.strip() == "'  a '"
+ 
+-    def test_4(self, bash):
++    def test_4(self, bash, functions):
+         output = assert_bash_exec(
+             bash, "__tester \"a'b'c\"", want_output=True, want_newline=False
+         )
+         assert output.strip() == r"'a'\''b'\''c'"
+ 
+-    def test_5(self, bash):
++    def test_5(self, bash, functions):
+         output = assert_bash_exec(
+             bash, '__tester "a\'"', want_output=True, want_newline=False
+         )
+-- 
+2.47.1
+

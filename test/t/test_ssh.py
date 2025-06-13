@@ -10,8 +10,12 @@ class TestSsh:
 
     @pytest.mark.complete("ssh -F config ls", cwd="ssh")
     def test_2(self, completion):
-        """Should complete both commands and hostname."""
-        assert all(x in completion for x in "ls ls_known_host".split())
+        """
+        Should not complete commands when host is not specified.
+
+        Test sanity assumes there are commands starting with `ls`.
+        """
+        assert completion == "_known_host"
 
     @pytest.mark.complete("ssh bash", cwd="ssh")
     def test_3(self, completion):
@@ -58,3 +62,8 @@ class TestSsh:
     def test_protocol_option_bundling(self, bash, protocol):
         completion = assert_complete(bash, "ssh -%sF ssh/" % protocol)
         assert "config" in completion
+
+    @pytest.mark.complete("ssh -F config -o ForwardX11=yes ls", cwd="ssh")
+    def test_options_with_args_and_arg_counting(self, completion):
+        """Options with arguments should not confuse arg counting."""
+        assert completion == "_known_host"

@@ -2,7 +2,7 @@ from itertools import chain
 
 import pytest
 
-from conftest import assert_bash_exec
+from conftest import assert_bash_exec, assert_complete, bash_env_saved
 
 LIVE_HOST = "bash_completion"
 
@@ -23,7 +23,7 @@ class TestScp:
                     )
                 ),
                 # Local filenames
-                ["config", "known_hosts", r"spaced\ \ conf"],
+                ["bin/", "config", "known_hosts", r"spaced\ \ conf"],
             )
         )
         assert completion == expected
@@ -43,7 +43,7 @@ class TestScp:
                     )
                 ),
                 # Local filenames
-                ["config", "known_hosts", r"spaced\ \ conf"],
+                ["bin/", "config", "known_hosts", r"spaced\ \ conf"],
             )
         )
         assert completion == expected
@@ -76,4 +76,68 @@ class TestScp:
         Connection to it must open sufficiently quickly for the
         ConnectTimeout and sleep_after_tab settings.
         """
-        assert completion == "%s:%s/" % (LIVE_HOST, live_pwd)
+        assert completion == f"{LIVE_HOST}:{live_pwd}/"
+
+    @pytest.mark.complete("scp -o Foo=")
+    def test_option_arg(self, completion):
+        assert not completion  # and no errors either
+
+    @pytest.mark.complete(
+        "scp hostname-not-expected-to-exist-in-known-hosts:",
+        shopt=dict(nullglob=True),
+    )
+    def test_remote_path_with_nullglob(self, completion):
+        assert not completion
+
+    @pytest.mark.complete(
+        "scp hostname-not-expected-to-exist-in-known-hosts:",
+        shopt=dict(failglob=True),
+    )
+    def test_remote_path_with_failglob(self, completion):
+        assert not completion
+
+    def test_remote_path_with_spaces(self, bash):
+        assert_bash_exec(bash, "ssh() { echo 'spaces in filename.txt'; }")
+        completion = assert_complete(bash, "scp remote_host:spaces")
+        assert_bash_exec(bash, "unset -f ssh")
+        assert completion == r"\\\ in\\\ filename.txt"
+
+    def test_xfunc_remote_files(self, bash):
+        with bash_env_saved(bash) as bash_env:
+            bash_env.save_variable("COMPREPLY")
+            bash_env.write_variable(
+                "PATH",
+                "$PWD/scp/bin:$PATH",
+                quote=False,
+            )
+            bash_env.write_variable("cur", "local:shared/default/")
+            completions_regular_escape = (
+                assert_bash_exec(
+                    bash,
+                    r'_comp_compgen -x scp remote_files; printf "%s\n" "${COMPREPLY[@]}"',
+                    want_output=True,
+                )
+                .strip()
+                .splitlines()
+            )
+            completions_less_escape = (
+                assert_bash_exec(
+                    bash,
+                    r'_comp_compgen -x scp remote_files -l; printf "%s\n" "${COMPREPLY[@]}"',
+                    want_output=True,
+                )
+                .strip()
+                .splitlines()
+            )
+        assert completions_regular_escape == [
+            "shared/default/bar ",
+            r"shared/default/bar\\\ bar.d/",
+            "shared/default/foo ",
+            "shared/default/foo.d/",
+        ]
+        assert completions_less_escape == [
+            "shared/default/bar ",
+            r"shared/default/bar\ bar.d/",
+            "shared/default/foo ",
+            "shared/default/foo.d/",
+        ]

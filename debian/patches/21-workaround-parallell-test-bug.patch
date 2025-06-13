@@ -1,0 +1,55 @@
+From: Gabriel F. T. Gomes <gabriel@inconstante.net.br>
+Subject: Workaround for function definition in command offset test
+Bug: https://github.com/scop/bash-completion/pull/1312
+
+If the first item in test2 is not executed, for example with the
+following diff:
+
+  @@ -55,7 +55,6 @@ class TestUnitCommandOffset:
+       @pytest.mark.parametrize(
+           "cmd,expected_completion",
+           [
+  -            ("cmd2", wordlist),
+               ("cmd3", wordlist),
+               ("cmd4", []),
+               ("cmd5", ["0"]),
+
+test_cmd_quoted fails with the following error message:
+
+      def test_cmd_quoted(self, bash, functions):
+  >       assert assert_complete(bash, "meta 'cmd2' ") == self.wordlist
+  E       AssertionError: assert <CompletionResult []> == ['bar', 'foo']
+  E
+  E         Full diff:
+  E         + <CompletionResult []>
+  E         - [
+  E         -     'bar',
+  E         -     'foo',
+  E         - ]
+
+This means that test_cmd_quoted depends on the previous execution of
+test2. When executed serially, this issue does not manifest itself.
+However, with parallel execution it might, dependending on the
+scheduling of the tests.
+
+This patch adds a workaround to test_cmd_quoted, so that it executes the
+required subcommand of test2 prior to its own test.
+---
+ test/t/unit/test_unit_command_offset.py | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/test/t/unit/test_unit_command_offset.py b/test/t/unit/test_unit_command_offset.py
+index 0e32c1f8..039b5e30 100644
+--- a/test/t/unit/test_unit_command_offset.py
++++ b/test/t/unit/test_unit_command_offset.py
+@@ -97,6 +97,7 @@ class TestUnitCommandOffset:
+         assert got == expected_completion
+ 
+     def test_cmd_quoted(self, bash, functions):
++        assert assert_complete(bash, "meta cmd2 ") == self.wordlist
+         assert assert_complete(bash, "meta 'cmd2' ") == self.wordlist
+ 
+     def test_cmd_specialchar(self, bash, functions):
+-- 
+2.47.1
+

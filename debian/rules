@@ -12,7 +12,7 @@ override_dh_compress:
 	dh_compress -Xcompletions
 
 override_dh_installchangelogs:
-	dh_installchangelogs CHANGES
+	dh_installchangelogs CHANGELOG.md
 
 dh_bash-completion.1: debian/extra/debhelper/dh_bash-completion
 	pod2man \

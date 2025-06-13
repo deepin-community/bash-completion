@@ -42,7 +42,7 @@ class TestXfreerdp:
     @pytest.mark.complete(
         "xfreerdp /kbd:",
         require_cmd=True,
-        skipif='test -z "$(xfreerdp /kbd-list 2>/dev/null)"',
+        skipif='test ! "$(xfreerdp /kbd-list 2>/dev/null)"',
     )
     def test_4(self, bash, completion, help_success, slash_syntax):
         assert completion
@@ -58,3 +58,7 @@ class TestXfreerdp:
     @pytest.mark.complete("xfreerdp --help ", require_cmd=True)
     def test_7(self, completion):
         assert not completion
+
+    @pytest.mark.complete("xfreerdp ./")
+    def test_rdp_files(self, completion):
+        assert completion  # just dirs for now in the fixture, but that'll do

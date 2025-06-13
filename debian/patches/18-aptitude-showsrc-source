@@ -1,0 +1,24 @@
+Author: Heinrich Schuchardt <heinrich.schuchardt@canonical.com>
+Subject: completions/aptitude: add showsrc source
+Origin: https://salsa.debian.org/debian/bash-completion/-/merge_requests/5
+Bug: https://github.com/scop/bash-completion/pull/1313
+
+completions/aptitude: add showsrc source
+
+Add missing sub-commands.
+
+Signed-off-by: Heinrich Schuchardt <heinrich.schuchardt@canonical.com>
+
+diff --git a/completions/aptitude b/completions/aptitude
+index 827395a0..54a90693 100644
+--- a/completions/aptitude
++++ b/completions/aptitude
+@@ -98,7 +98,7 @@ _comp_cmd_aptitude()
+             autoclean install reinstall remove hold unhold purge markauto
+             unmarkauto why why-not dist-upgrade full-upgrade download search
+             show forbid-version changelog keep keep-all build-dep add-user-tag
+-            remove-user-tag versions'
++            remove-user-tag showsrc source versions'
+     fi
+ 
+ } &&

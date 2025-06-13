@@ -1,24 +1,28 @@
+default_stages: [pre-commit]
+minimum_pre_commit_version: 3.2.0 # for "default_stages" names
+
 repos:
 
-  - repo: local
+  - repo: https://github.com/jorisroovers/gitlint
+    rev: v0.19.1
+    hooks:
+      - id: gitlint
+
+  - repo: https://github.com/scop/pre-commit-shfmt
+    rev: v3.10.0-2
     hooks:
       - id: shfmt
-        name: shfmt
-        language: golang
-        additional_dependencies: [mvdan.cc/sh/v3/cmd/shfmt@v3.1.2]
-        entry: shfmt
-        args: [-w, -s]
         types: [text]
-        files: ^(bash_completion|completions/.+|test/(config/bashrc|update-test-cmd-list)|.+\.sh(\.in)?)$
+        files: ^(bash_completion(\.d/[^/]+\.bash)?|completions/.+|test/(config/bashrc|fixtures/.+/bin/.+|fallback/update-fallback-links|runLint|update-test-cmd-list)|.+\.sh(\.in)?)$
         exclude: ^completions/(\.gitignore|Makefile.*)$
 
   - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: v0.7.1.1
+    rev: v0.10.0.1
     hooks:
       - id: shellcheck
         args: [-f, gcc]
         types: [text]
-        files: ^(bash_completion|completions/.+|test/(config/bashrc|update-test-cmd-list)|.+\.sh(\.in)?)$
+        files: ^(bash_completion(\.d/[^/]+\.bash)?|completions/.+|test/(config/bashrc|fixtures/.+/bin/.+|fallback/update-fallback-links|runLint|update-test-cmd-list)|.+\.sh(\.in)?)$
         exclude: ^completions/(\.gitignore|Makefile.*)$
         require_serial: false  # We disable SC1090 anyway, so parallel is ok
 
@@ -31,67 +35,70 @@ repos:
         files: ^test/t/.+\.py$
         pass_filenames: false
 
-  - repo: https://github.com/psf/black
-    rev: 19.10b0
+      - id: update-test-fallback-links
+        name: update-test-fallback-links
+        language: script
+        entry: test/fallback/update-fallback-links
+        files: ^completions/_
+        pass_filenames: false
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
     hooks:
-      - id: black
+      - id: ruff
+        types: [text]
+        files: ^(helpers/python|.+\.py)$
+        exclude: ^completions/
+      - id: ruff-format
         types: [text]
         files: ^(helpers/python|.+\.py)$
         exclude: ^completions/
 
-  - repo: https://gitlab.com/pycqa/flake8
-    rev: 3.8.3
-    hooks:
-      - id: flake8
-        args: [--config=test/setup.cfg]
-        additional_dependencies: [flake8-bugbear==20.1.4]
-        types: [text]
-        files: ^(helpers/python|.+\.py)$
-        exclude: ^completions/
-
-  - repo: https://github.com/timothycrosley/isort
-    rev: 5.1.4
-    hooks:
-      - id: isort
-        args: [--settings-path=test/setup.cfg]
-        types: [text]
-        files: ^(helpers/python|.+\.py)$
-        exclude: ^completions/
-
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v0.782
+  - repo: local
     hooks:
       - id: mypy
+        name: mypy
+        language: python
+        additional_dependencies:
+          - venv-run==0.2.0
+        entry: venv-run mypy
         args: [--config-file=test/setup.cfg]
-        # Intentionally not run on helpers/python (support very old versions)
+        types: [python]
+        # Intentionally not run on helpers/python (we support very old versions)
         exclude: ^completions/|^test/fixtures/pytest/
 
-  - repo: https://github.com/asottile/pyupgrade
-    rev: v2.7.2
-    hooks:
-      - id: pyupgrade
-        args: [--py3-plus, --keep-percent-format]
-        exclude: ^completions/
-
   - repo: https://github.com/perltidy/perltidy
-    rev: "20200619"
+    rev: "20240903"
     hooks:
       - id: perltidy
         types: [text]
         files: ^(helpers/perl|.+\.p[ml])$
 
-  - repo: local
+  - repo: https://github.com/scop/pre-commit-perlcritic
+    rev: v1.144-1
     hooks:
       - id: perlcritic
-        name: perlcritic
-        language: perl
-        additional_dependencies: [PETDANCE/Perl-Critic-1.138.tar.gz]
-        entry: perlcritic
         args: [--quiet, --verbose, "5"]
         types: [text]
         files: ^(helpers/perl|.+\.p[ml])$
 
-  - repo: https://github.com/igorshubovych/markdownlint-cli
-    rev: v0.23.2
+  - repo: https://github.com/jackdewinter/pymarkdown
+    rev: v0.9.26
     hooks:
-      - id: markdownlint
+      - id: pymarkdown
+        entry: pymarkdown
+        args:
+          - --config=.pymarkdown.json
+          - scan
+        exclude: ^CHANGELOG\.md$
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-case-conflict
+
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.28.4
+    hooks:
+      - id: typos
+        exclude: ^(CHANGELOG\.md|test/(test-cmd-list\.txt|fixtures/.+))$

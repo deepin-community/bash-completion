@@ -1,0 +1,14 @@
+Tests: upstream
+Depends:
+  @,
+  python3-pexpect,
+  python3-pytest,
+  automake,
+  iproute2,
+  perl,
+Architecture:
+  amd64,
+  armel,
+  armhf,
+  i386,
+  ppc64el,

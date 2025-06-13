@@ -2,15 +2,32 @@ import difflib
 import os
 import re
 import shlex
+import shutil
 import subprocess
+import sys
+import tempfile
 import time
-from typing import Callable, Iterable, Iterator, List, Optional, Tuple
+from enum import Enum
+from pathlib import Path
+from types import TracebackType
+from typing import (
+    Callable,
+    Dict,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    TextIO,
+    Tuple,
+    Type,
+)
 
-import pexpect
+import pexpect  # type: ignore[import]
 import pytest
 
 PS1 = "/@"
-MAGIC_MARK = "__MaGiC-maRKz!__"
+MAGIC_MARK = "__MaGiC-maRKz-NEtXZVZfKC__"
+MAGIC_MARK2 = "Re8SCgEdfN"
 
 
 def find_unique_completion_pair(
@@ -115,8 +132,8 @@ def _avahi_hosts(bash: pexpect.spawn) -> List[str]:
 def known_hosts(bash: pexpect.spawn) -> List[str]:
     output = assert_bash_exec(
         bash,
-        '_known_hosts_real ""; '
-        r'printf "%s\n" "${COMPREPLY[@]}"; unset COMPREPLY',
+        '_comp_compgen_known_hosts ""; '
+        r'printf "%s\n" "${COMPREPLY[@]}"; unset -v COMPREPLY',
         want_output=True,
     )
     return sorted(set(output.split()))
@@ -127,7 +144,9 @@ def user_home(bash: pexpect.spawn) -> Tuple[str, str]:
     user = assert_bash_exec(
         bash, 'id -un 2>/dev/null || echo "$USER"', want_output=True
     ).strip()
-    home = assert_bash_exec(bash, 'echo "$HOME"', want_output=True).strip()
+    # We used to echo $HOME here, but we expect that it will be consistent with
+    # ~user as far as bash is concerned which may not hold.
+    home = assert_bash_exec(bash, "echo ~%s" % user, want_output=True).strip()
     return (user, home)
 
 
@@ -167,107 +186,175 @@ def partialize(
 
 @pytest.fixture(scope="class")
 def bash(request) -> pexpect.spawn:
+    logfile: Optional[TextIO] = None
+    histfile = None
+    tmpdir = None
+    bash = None
 
-    logfile = None
-    if os.environ.get("BASHCOMP_TEST_LOGFILE"):
-        logfile = open(os.environ["BASHCOMP_TEST_LOGFILE"], "w")
+    if os.environ.get("BASH_COMPLETION_TEST_LOGFILE"):
+        logfile = open(os.environ["BASH_COMPLETION_TEST_LOGFILE"], "w")
+    elif os.environ.get("CI"):
+        logfile = sys.stdout
+
     testdir = os.path.abspath(
         os.path.join(os.path.dirname(__file__), os.pardir)
     )
-    env = os.environ.copy()
-    env.update(
-        dict(
-            SRCDIR=testdir,  # TODO needed at least by bashrc
-            SRCDIRABS=testdir,  # TODO needed?
-            PS1=PS1,
-            INPUTRC="%s/config/inputrc" % testdir,
-            TERM="dumb",
-            LC_COLLATE="C",  # to match Python's default locale unaware sort
-        )
+
+    # Create an empty temporary file for HISTFILE.
+    #
+    # To prevent the tested Bash processes from writing to the user's
+    # history file or any other files, we prepare an empty temporary
+    # file for each test.
+    #
+    # - Note that HISTFILE=/dev/null may not work.  It results in the
+    #   removal of the device /dev/null and the creation of a regular
+    #   file at /dev/null when the number of commands reach
+    #   HISTFILESIZE due to a bug in bash 4.3.  This causes execution of
+    #   garbage through BASH_COMPLETION_USER_FILE=/dev/null.
+    # - Note also that "unset -v HISTFILE" in "test/config/bashrc" was not
+    #   adopted because "test/config/bashrc" is loaded after the
+    #   history is read from the history file.
+    #
+    histfile = tempfile.NamedTemporaryFile(
+        prefix="bash-completion-test_", delete=False
     )
 
-    fixturesdir = os.path.join(testdir, "fixtures")
-    os.chdir(fixturesdir)
+    try:
+        # release the file handle so that Bash can open the file.
+        histfile.close()
 
-    # Start bash
-    bash = pexpect.spawn(
-        "%s --norc" % os.environ.get("BASHCOMP_TEST_BASH", "bash"),
-        maxread=os.environ.get("BASHCOMP_TEST_PEXPECT_MAXREAD", 20000),
-        logfile=logfile,
-        cwd=fixturesdir,
-        env=env,
-        encoding="utf-8",  # TODO? or native or...?
-        # FIXME: Tests shouldn't depend on dimensions, but it's difficult to
-        # expect robustly enough for Bash to wrap lines anywhere (e.g. inside
-        # MAGIC_MARK).  Increase window width to reduce wrapping.
-        dimensions=(24, 160),
-        # TODO? codec_errors="replace",
-    )
-    bash.expect_exact(PS1)
-
-    # Load bashrc and bash_completion
-    assert_bash_exec(bash, "source '%s/config/bashrc'" % testdir)
-    assert_bash_exec(bash, "source '%s/../bash_completion'" % testdir)
-
-    # Use command name from marker if set, or grab from test filename
-    cmd = None  # type: Optional[str]
-    cmd_found = False
-    marker = request.node.get_closest_marker("bashcomp")
-    if marker:
-        cmd = marker.kwargs.get("cmd")
-        cmd_found = "cmd" in marker.kwargs
-        # Run pre-test commands, early so they're usable in skipif
-        for pre_cmd in marker.kwargs.get("pre_cmds", []):
-            assert_bash_exec(bash, pre_cmd)
-        # Process skip and xfail conditions
-        skipif = marker.kwargs.get("skipif")
-        if skipif:
-            try:
-                assert_bash_exec(bash, skipif, want_output=None)
-            except AssertionError:
-                pass
-            else:
-                bash.close()
-                pytest.skip(skipif)
-        xfail = marker.kwargs.get("xfail")
-        if xfail:
-            try:
-                assert_bash_exec(bash, xfail, want_output=None)
-            except AssertionError:
-                pass
-            else:
-                pytest.xfail(xfail)
-    if not cmd_found:
-        match = re.search(
-            r"^test_(.+)\.py$", os.path.basename(str(request.fspath))
+        env = os.environ.copy()
+        env.update(
+            dict(
+                SRCDIR=testdir,  # TODO needed at least by bashrc
+                SRCDIRABS=testdir,
+                PS1=PS1,
+                INPUTRC="%s/config/inputrc" % testdir,
+                TERM="dumb",
+                LC_COLLATE="C",  # to match Python's default locale unaware sort
+                HISTFILE=histfile.name,
+            )
         )
-        if match:
-            cmd = match.group(1)
 
-    request.cls.cmd = cmd
+        marker = request.node.get_closest_marker("bashcomp")
 
-    if (cmd_found and cmd is None) or is_testable(bash, cmd):
-        before_env = get_env(bash)
-        yield bash
-        # Not exactly sure why, but some errors leave bash in state where
-        # getting the env here would fail and trash our test output. So
-        # reset to a good state first (Ctrl+C, expect prompt).
-        bash.sendintr()
+        # Set up the current working directory
+        cwd = None
+        if marker:
+            if "cwd" in marker.kwargs and marker.kwargs.get("cwd") is not None:
+                cwd = os.path.join(
+                    testdir, "fixtures", marker.kwargs.get("cwd")
+                )
+            elif "temp_cwd" in marker.kwargs and marker.kwargs.get("temp_cwd"):
+                tmpdir = tempfile.TemporaryDirectory(
+                    prefix="bash-completion-test_"
+                )
+                cwd = tmpdir.name
+        if cwd is None:
+            cwd = os.path.join(testdir, "fixtures")
+        os.chdir(cwd)
+
+        # Start bash
+        bash = pexpect.spawn(
+            "%s --norc" % os.environ.get("BASH_COMPLETION_TEST_BASH", "bash"),
+            maxread=os.environ.get(
+                "BASH_COMPLETION_TEST_PEXPECT_MAXREAD", 20000
+            ),
+            logfile=logfile,
+            cwd=cwd,
+            env=env,
+            encoding="utf-8",  # TODO? or native or...?
+            # FIXME: Tests shouldn't depend on dimensions, but it's difficult to
+            # expect robustly enough for Bash to wrap lines anywhere (e.g. inside
+            # MAGIC_MARK).  Increase window width to reduce wrapping.
+            dimensions=(24, 240),
+            # TODO? codec_errors="replace",
+        )
         bash.expect_exact(PS1)
-        diff_env(
-            before_env,
-            get_env(bash),
-            marker.kwargs.get("ignore_env") if marker else "",
+
+        # Load bashrc and bash_completion
+        bash_completion = os.environ.get(
+            "BASH_COMPLETION_TEST_BASH_COMPLETION",
+            "%s/../bash_completion" % testdir,
         )
+        assert_bash_exec(bash, "source '%s/config/bashrc'" % testdir)
+        assert_bash_exec(bash, "source '%s'" % bash_completion)
 
-    if marker:
-        for post_cmd in marker.kwargs.get("post_cmds", []):
-            assert_bash_exec(bash, post_cmd)
+        # Use command name from marker if set, or grab from test filename
+        cmd = None  # type: Optional[str]
+        cmd_found = False
+        if marker:
+            cmd = marker.kwargs.get("cmd")
+            cmd_found = "cmd" in marker.kwargs
+            # Run pre-test commands, early so they're usable in skipif
+            for pre_cmd in marker.kwargs.get("pre_cmds", []):
+                assert_bash_exec(bash, pre_cmd, want_output=None)
+            # Process skip and xfail conditions
+            skipif = marker.kwargs.get("skipif")
+            if skipif:
+                try:
+                    assert_bash_exec(bash, skipif, want_output=None)
+                except AssertionError:
+                    pass
+                else:
+                    bash.close()
+                    bash = None
+                    pytest.skip(skipif)
+            xfail = marker.kwargs.get("xfail")
+            if xfail:
+                try:
+                    assert_bash_exec(bash, xfail, want_output=None)
+                except AssertionError:
+                    pass
+                else:
+                    pytest.xfail(xfail)
+        if not cmd_found:
+            match = re.search(
+                r"^test_(.+)\.py$", os.path.basename(str(request.fspath))
+            )
+            if match:
+                cmd = match.group(1)
+        if (
+            marker
+            and marker.kwargs
+            and marker.kwargs.get("require_cmd", False)
+        ):
+            if not is_bash_type(bash, cmd):
+                pytest.skip("Command not found")
 
-    # Clean up
-    bash.close()
-    if logfile:
-        logfile.close()
+        request.cls.cmd = cmd
+
+        if (cmd_found and cmd is None) or is_testable(bash, cmd):
+            before_env = get_env(bash)
+            yield bash
+            # Not exactly sure why, but some errors leave bash in state where
+            # getting the env here would fail and trash our test output. So
+            # reset to a good state first (Ctrl+C, expect prompt).
+            bash.sendintr()
+            bash.expect_exact(PS1)
+            diff_env(
+                before_env,
+                get_env(bash),
+                marker.kwargs.get("ignore_env") if marker else "",
+            )
+
+        if marker:
+            for post_cmd in marker.kwargs.get("post_cmds", []):
+                assert_bash_exec(bash, post_cmd, want_output=None)
+
+    finally:
+        # Clean up
+        if bash:
+            bash.close()
+        if tmpdir:
+            tmpdir.cleanup()
+        if histfile:
+            try:
+                os.remove(histfile.name)
+            except OSError:
+                pass
+        if logfile and logfile != sys.stdout:
+            logfile.close()
 
 
 def is_testable(bash: pexpect.spawn, cmd: Optional[str]) -> bool:
@@ -292,10 +379,10 @@ def is_bash_type(bash: pexpect.spawn, cmd: Optional[str]) -> bool:
 
 def load_completion_for(bash: pexpect.spawn, cmd: str) -> bool:
     try:
-        # Allow __load_completion to fail so we can test completions
+        # Allow _comp_load to fail so we can test completions
         # that are directly loaded in bash_completion without a separate file.
-        assert_bash_exec(bash, "__load_completion %s || :" % cmd)
-        assert_bash_exec(bash, "complete -p %s &>/dev/null" % cmd)
+        assert_bash_exec(bash, "_comp_load -- %s || :" % cmd)
+        assert_bash_exec(bash, "complete -p -- %s &>/dev/null" % cmd)
     except AssertionError:
         return False
     return True
@@ -341,27 +428,301 @@ def assert_bash_exec(
         if output:
             assert want_output, (
                 'Unexpected output from "%s": exit status=%s, output="%s"'
-                % (cmd, status, output)
+                % (
+                    cmd,
+                    status,
+                    output,
+                )
             )
         else:
             assert not want_output, (
                 'Expected output from "%s": exit status=%s, output="%s"'
-                % (cmd, status, output)
+                % (
+                    cmd,
+                    status,
+                    output,
+                )
             )
 
     return output
 
 
+class bash_env_saved:
+    counter: int = 0
+
+    class saved_state(Enum):
+        ChangesDetected = 1
+        ChangesIgnored = 2
+
+    def __init__(self, bash: pexpect.spawn, sendintr: bool = False):
+        bash_env_saved.counter += 1
+        self.prefix: str = "_comp__test_%d" % bash_env_saved.counter
+
+        self.bash = bash
+        self.cwd_changed: bool = False
+        self.saved_set: Dict[str, bash_env_saved.saved_state] = {}
+        self.saved_shopt: Dict[str, bash_env_saved.saved_state] = {}
+        self.saved_variables: Dict[str, bash_env_saved.saved_state] = {}
+        self.sendintr = sendintr
+
+        self.noexcept: bool = False
+        self.captured_error: Optional[Exception] = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_value: Optional[BaseException],
+        exc_traceback: Optional[TracebackType],
+    ) -> None:
+        self._restore_env()
+        return None
+
+    def _safe_sendintr(self):
+        try:
+            self.bash.sendintr()
+            self.bash.expect_exact(PS1)
+        except Exception as e:
+            if self.noexcept:
+                self.captured_error = e
+            else:
+                raise
+
+    def _safe_exec(self, cmd: str):
+        try:
+            self.bash.sendline(cmd)
+            self.bash.expect_exact(cmd)
+            self.bash.expect_exact("\r\n" + PS1)
+        except Exception as e:
+            if self.noexcept:
+                self._safe_sendintr()
+                self.captured_error = e
+            else:
+                raise
+
+    def _safe_assert(self, cmd: str):
+        try:
+            assert_bash_exec(self.bash, cmd, want_output=None)
+        except Exception as e:
+            if self.noexcept:
+                self._safe_sendintr()
+                self.captured_error = e
+            else:
+                raise
+
+    def _copy_variable(self, src_var: str, dst_var: str):
+        self._safe_exec(
+            "if [[ ${%s+set} ]]; then %s=${%s}; else unset -v %s; fi"
+            % (src_var, dst_var, src_var, dst_var),
+        )
+
+    def _unset_variable(self, varname: str):
+        self._safe_exec("unset -v %s" % varname)
+
+    def _save_cwd(self):
+        if not self.cwd_changed:
+            self.cwd_changed = True
+            self._copy_variable("PWD", "%s_OLDPWD" % self.prefix)
+
+    def _check_set(self, name: str):
+        if self.saved_set[name] != bash_env_saved.saved_state.ChangesDetected:
+            return
+        self._safe_assert(
+            '[[ $(shopt -po %s) == "${%s_NEWSHOPT_%s}" ]]'
+            % (name, self.prefix, name),
+        )
+
+    def _unprotect_set(self, name: str):
+        if name not in self.saved_set:
+            self.saved_set[name] = bash_env_saved.saved_state.ChangesDetected
+            self._safe_exec(
+                "%s_OLDSHOPT_%s=$(shopt -po %s || true)"
+                % (self.prefix, name, name),
+            )
+        else:
+            self._check_set(name)
+
+    def _protect_set(self, name: str):
+        self._safe_exec(
+            "%s_NEWSHOPT_%s=$(shopt -po %s || true)"
+            % (self.prefix, name, name),
+        )
+
+    def _check_shopt(self, name: str):
+        if (
+            self.saved_shopt[name]
+            != bash_env_saved.saved_state.ChangesDetected
+        ):
+            return
+        self._safe_assert(
+            '[[ $(shopt -p %s) == "${%s_NEWSHOPT_%s}" ]]'
+            % (name, self.prefix, name),
+        )
+
+    def _unprotect_shopt(self, name: str):
+        if name not in self.saved_shopt:
+            self.saved_shopt[name] = bash_env_saved.saved_state.ChangesDetected
+            self._safe_exec(
+                "%s_OLDSHOPT_%s=$(shopt -p %s || true)"
+                % (self.prefix, name, name),
+            )
+        else:
+            self._check_shopt(name)
+
+    def _protect_shopt(self, name: str):
+        self._safe_exec(
+            "%s_NEWSHOPT_%s=$(shopt -p %s || true)"
+            % (self.prefix, name, name),
+        )
+
+    def _check_variable(self, varname: str):
+        if (
+            self.saved_variables[varname]
+            != bash_env_saved.saved_state.ChangesDetected
+        ):
+            return
+        try:
+            self._safe_assert(
+                '[[ ${%s-%s} == "${%s_NEWVAR_%s-%s}" ]]'
+                % (varname, MAGIC_MARK2, self.prefix, varname, MAGIC_MARK2),
+            )
+        except Exception:
+            self._copy_variable(
+                "%s_NEWVAR_%s" % (self.prefix, varname), varname
+            )
+            raise
+        else:
+            if self.noexcept and self.captured_error:
+                self._copy_variable(
+                    "%s_NEWVAR_%s" % (self.prefix, varname), varname
+                )
+
+    def _unprotect_variable(self, varname: str):
+        if varname not in self.saved_variables:
+            self.saved_variables[varname] = (
+                bash_env_saved.saved_state.ChangesDetected
+            )
+            self._copy_variable(
+                varname, "%s_OLDVAR_%s" % (self.prefix, varname)
+            )
+        else:
+            self._check_variable(varname)
+
+    def _protect_variable(self, varname: str):
+        self._copy_variable(varname, "%s_NEWVAR_%s" % (self.prefix, varname))
+
+    def _restore_env(self):
+        self.noexcept = True
+
+        if self.sendintr:
+            self._safe_sendintr()
+
+        # We first go back to the original directory before restoring
+        # variables because "cd" affects "OLDPWD".
+        if self.cwd_changed:
+            self._unprotect_variable("OLDPWD")
+            self._safe_exec('command cd -- "$%s_OLDPWD"' % self.prefix)
+            self._protect_variable("OLDPWD")
+            self._unset_variable("%s_OLDPWD" % self.prefix)
+            self.cwd_changed = False
+
+        for varname in self.saved_variables:
+            self._check_variable(varname)
+            self._copy_variable(
+                "%s_OLDVAR_%s" % (self.prefix, varname), varname
+            )
+            self._unset_variable("%s_OLDVAR_%s" % (self.prefix, varname))
+            self._unset_variable("%s_NEWVAR_%s" % (self.prefix, varname))
+        self.saved_variables = {}
+
+        for name in self.saved_shopt:
+            self._check_shopt(name)
+            self._safe_exec('eval "$%s_OLDSHOPT_%s"' % (self.prefix, name))
+            self._unset_variable("%s_OLDSHOPT_%s" % (self.prefix, name))
+            self._unset_variable("%s_NEWSHOPT_%s" % (self.prefix, name))
+        self.saved_shopt = {}
+
+        for name in self.saved_set:
+            self._check_set(name)
+            self._safe_exec('eval "$%s_OLDSHOPT_%s"' % (self.prefix, name))
+            self._unset_variable("%s_OLDSHOPT_%s" % (self.prefix, name))
+            self._unset_variable("%s_NEWSHOPT_%s" % (self.prefix, name))
+        self.saved_set = {}
+
+        self.noexcept = False
+        if self.captured_error:
+            raise self.captured_error
+
+    def chdir(self, path: str):
+        self._save_cwd()
+        self.cwd_changed = True
+        self._unprotect_variable("OLDPWD")
+        self._safe_exec("command cd -- %s" % shlex.quote(path))
+        self._protect_variable("OLDPWD")
+
+    def set(self, name: str, value: bool):
+        self._unprotect_set(name)
+        if value:
+            self._safe_exec("set -o %s" % name)
+        else:
+            self._safe_exec("set +o %s" % name)
+        self._protect_set(name)
+
+    def save_set(self, name: str):
+        self._unprotect_set(name)
+        self.saved_set[name] = bash_env_saved.saved_state.ChangesIgnored
+
+    def shopt(self, name: str, value: bool):
+        self._unprotect_shopt(name)
+        if value:
+            self._safe_exec("shopt -s %s" % name)
+        else:
+            self._safe_exec("shopt -u %s" % name)
+        self._protect_shopt(name)
+
+    def save_shopt(self, name: str):
+        self._unprotect_shopt(name)
+        self.saved_shopt[name] = bash_env_saved.saved_state.ChangesIgnored
+
+    def write_variable(self, varname: str, new_value: str, quote: bool = True):
+        if quote:
+            new_value = shlex.quote(new_value)
+        self._unprotect_variable(varname)
+        self._safe_exec("%s=%s" % (varname, new_value))
+        self._protect_variable(varname)
+
+    def save_variable(self, varname: str):
+        self._unprotect_variable(varname)
+        self.saved_variables[varname] = (
+            bash_env_saved.saved_state.ChangesIgnored
+        )
+
+    # TODO: We may restore the "export" attribute as well though it is
+    #   not currently tested in "diff_env"
+    def write_env(self, envname: str, new_value: str, quote: bool = True):
+        if quote:
+            new_value = shlex.quote(new_value)
+        self._unprotect_variable(envname)
+        self._safe_exec("export %s=%s" % (envname, new_value))
+        self._protect_variable(envname)
+
+
 def get_env(bash: pexpect.spawn) -> List[str]:
-    return (
-        assert_bash_exec(
+    return [
+        x
+        for x in assert_bash_exec(
             bash,
-            "{ (set -o posix ; set); declare -F; shopt -p; set -o; }",
+            "_comp__test_get_env",
             want_output=True,
         )
         .strip()
         .splitlines()
-    )
+        # Sometimes there are empty lines in the output due to unknown
+        # reasons, e.g. in GitHub Actions' macos-latest OS. Filter them out.
+        if x
+    ]
 
 
 def diff_env(before: List[str], after: List[str], ignore: str):
@@ -371,7 +732,11 @@ def diff_env(before: List[str], after: List[str], ignore: str):
         # Remove unified diff markers:
         if not re.search(r"^(---|\+\+\+|@@ )", x)
         # Ignore variables expected to change:
-        and not re.search("^[-+](_|PPID|BASH_REMATCH|OLDPWD)=", x)
+        and not re.search(
+            r"^[-+](_|PPID|BASH_REMATCH|(BASH_)?LINENO)=",
+            x,
+            re.ASCII,
+        )
         # Ignore likely completion functions added by us:
         and not re.search(r"^\+declare -f _.+", x)
         # ...and additional specified things:
@@ -455,73 +820,72 @@ def assert_complete(
             pass
         else:
             pytest.xfail(xfail)
-    cwd = kwargs.get("cwd")
-    if cwd:
-        assert_bash_exec(bash, "cd '%s'" % cwd)
-    env_prefix = "_BASHCOMP_TEST_"
-    env = kwargs.get("env", {})
-    if env:
-        # Back up environment and apply new one
-        assert_bash_exec(
-            bash,
-            " ".join('%s%s="${%s-}"' % (env_prefix, k, k) for k in env.keys()),
-        )
-        assert_bash_exec(
-            bash,
-            "export %s" % " ".join("%s=%s" % (k, v) for k, v in env.items()),
-        )
-    try:
-        bash.send(cmd + "\t")
+
+    with bash_env_saved(bash, sendintr=True) as bash_env:
+        cwd = kwargs.get("cwd")
+        if cwd:
+            bash_env.chdir(str(cwd))
+
+        for k, v in kwargs.get("env", {}).items():
+            bash_env.write_env(k, v, quote=False)
+
+        for k, v in kwargs.get("shopt", {}).items():
+            bash_env.shopt(k, v)
+
+        input_cmd = cmd
+        rendered_cmd = kwargs.get("rendered_cmd", cmd)
+        re_MAGIC_MARK = re.escape(MAGIC_MARK)
+
+        trail = kwargs.get("trail")
+        if trail:
+            # \002 = ^B = cursor left
+            input_cmd += trail + "\002" * len(trail)
+            rendered_cmd += trail + "\b" * len(trail)
+
+            # After reading the results, something weird happens. For most test
+            # setups, as expected (pun intended!), MAGIC_MARK follows as
+            # is. But for some others (e.g. CentOS 6, Ubuntu 14 test
+            # containers), we get MAGIC_MARK one character a time, followed
+            # each time by trail and the corresponding number of \b's. Don't
+            # know why, but accept it until/if someone finds out.  Or just be
+            # fine with it indefinitely, the visible and practical end result
+            # on a terminal is the same anyway.
+            maybe_trail = "(%s%s)?" % (re.escape(trail), "\b" * len(trail))
+            re_MAGIC_MARK = "".join(
+                re.escape(x) + maybe_trail for x in MAGIC_MARK
+            )
+
+        bash.send(input_cmd + "\t")
         # Sleep a bit if requested, to avoid `.*` matching too early
         time.sleep(kwargs.get("sleep_after_tab", 0))
-        bash.expect_exact(cmd)
+        bash.expect_exact(rendered_cmd)
         bash.send(MAGIC_MARK)
         got = bash.expect(
             [
                 # 0: multiple lines, result in .before
-                r"\r\n" + re.escape(PS1 + cmd) + ".*" + re.escape(MAGIC_MARK),
+                r"\r\n" + re.escape(PS1 + rendered_cmd) + ".*" + re_MAGIC_MARK,
                 # 1: no completion
-                r"^" + re.escape(MAGIC_MARK),
+                r"^" + re_MAGIC_MARK,
                 # 2: on same line, result in .match
-                r"^([^\r]+)%s$" % re.escape(MAGIC_MARK),
+                r"^([^\r]+)%s$" % re_MAGIC_MARK,
+                # 3: error messages
+                r"^([^\r].*)%s$" % re_MAGIC_MARK,
                 pexpect.EOF,
                 pexpect.TIMEOUT,
             ]
         )
         if got == 0:
-            output = bash.before
-            if output.endswith(MAGIC_MARK):
-                output = bash.before[: -len(MAGIC_MARK)]
-            result = CompletionResult(output)
+            output = re.sub(re_MAGIC_MARK + "$", "", bash.before)
+            return CompletionResult(output)
         elif got == 2:
             output = bash.match.group(1)
-            result = CompletionResult(output)
+            return CompletionResult(output)
+        elif got == 3:
+            output = bash.match.group(1)
+            raise AssertionError("Unexpected output: [%s]" % output)
         else:
             # TODO: warn about EOF/TIMEOUT?
-            result = CompletionResult()
-    finally:
-        bash.sendintr()
-        bash.expect_exact(PS1)
-        if env:
-            # Restore environment, and clean up backup
-            # TODO: Test with declare -p if a var was set, backup only if yes, and
-            #       similarly restore only backed up vars. Should remove some need
-            #       for ignore_env.
-            assert_bash_exec(
-                bash,
-                "export %s"
-                % " ".join(
-                    '%s="$%s%s"' % (k, env_prefix, k) for k in env.keys()
-                ),
-            )
-            assert_bash_exec(
-                bash,
-                "unset -v %s"
-                % " ".join("%s%s" % (env_prefix, k) for k in env.keys()),
-            )
-        if cwd:
-            assert_bash_exec(bash, "cd - >/dev/null")
-    return result
+            return CompletionResult()
 
 
 @pytest.fixture
@@ -530,7 +894,7 @@ def completion(request, bash: pexpect.spawn) -> CompletionResult:
     if not marker:
         return CompletionResult()
     for pre_cmd in marker.kwargs.get("pre_cmds", []):
-        assert_bash_exec(bash, pre_cmd)
+        assert_bash_exec(bash, pre_cmd, want_output=None)
     cmd = getattr(request.cls, "cmd", None)
     if marker.kwargs.get("require_longopt"):
         # longopt completions require both command presence and that it
@@ -539,64 +903,16 @@ def completion(request, bash: pexpect.spawn) -> CompletionResult:
             marker.kwargs["require_cmd"] = True
         if "xfail" not in marker.kwargs:
             marker.kwargs["xfail"] = (
+                # --help is required to exit with zero in order to not get a
+                # positive for cases where it errors out with a message like
+                # "foo: unrecognized option '--help'"
                 "! %s --help &>/dev/null || "
                 "! %s --help 2>&1 | command grep -qF -- --help"
             ) % ((cmd,) * 2)
     if marker.kwargs.get("require_cmd") and not is_bash_type(bash, cmd):
         pytest.skip("Command not found")
 
-    if "trail" in marker.kwargs:
-        return assert_complete_at_point(
-            bash, cmd=marker.args[0], trail=marker.kwargs["trail"]
-        )
-
     return assert_complete(bash, marker.args[0], **marker.kwargs)
-
-
-def assert_complete_at_point(
-    bash: pexpect.spawn, cmd: str, trail: str
-) -> CompletionResult:
-    # TODO: merge to assert_complete
-    fullcmd = "%s%s%s" % (
-        cmd,
-        trail,
-        "\002" * len(trail),
-    )  # \002 = ^B = cursor left
-    bash.send(fullcmd + "\t")
-    bash.send(MAGIC_MARK)
-    bash.expect_exact(fullcmd.replace("\002", "\b"))
-
-    got = bash.expect_exact(
-        [
-            # 0: multiple lines, result in .before
-            PS1 + fullcmd.replace("\002", "\b"),
-            # 1: no completion
-            MAGIC_MARK,
-            pexpect.EOF,
-            pexpect.TIMEOUT,
-        ]
-    )
-    if got == 0:
-        output = bash.before
-        result = CompletionResult(output)
-
-        # At this point, something weird happens. For most test setups, as
-        # expected (pun intended!), MAGIC_MARK follows as is. But for some
-        # others (e.g. CentOS 6, Ubuntu 14 test containers), we get MAGIC_MARK
-        # one character a time, followed each time by trail and the corresponding
-        # number of \b's. Don't know why, but accept it until/if someone finds out.
-        # Or just be fine with it indefinitely, the visible and practical end
-        # result on a terminal is the same anyway.
-        repeat = "(%s%s)?" % (re.escape(trail), "\b" * len(trail))
-        fullexpected = "".join(
-            "%s%s" % (re.escape(x), repeat) for x in MAGIC_MARK
-        )
-        bash.expect(fullexpected)
-    else:
-        # TODO: warn about EOF/TIMEOUT?
-        result = CompletionResult()
-
-    return result
 
 
 def in_container() -> bool:
@@ -622,6 +938,56 @@ def in_container() -> bool:
     except OSError:
         pass
     return False
+
+
+def prepare_fixture_dir(
+    request, files: Iterable[str], dirs: Iterable[str]
+) -> Tuple[Path, List[str], List[str]]:
+    """
+    Fixture to prepare a test dir with dummy contents on the fly.
+
+    Tests that contain filenames differing only by case should use this to
+    prepare a dir on the fly rather than including their fixtures in git and
+    the tarball. This is to work better with case insensitive file systems.
+    """
+    tempdir = Path(tempfile.mkdtemp(prefix="bash-completion-fixture-dir"))
+    request.addfinalizer(lambda: shutil.rmtree(str(tempdir)))
+
+    old_cwd = os.getcwd()
+    try:
+        os.chdir(tempdir)
+        new_files, new_dirs = create_dummy_filedirs(files, dirs)
+    finally:
+        os.chdir(old_cwd)
+
+    return tempdir, new_files, new_dirs
+
+
+def create_dummy_filedirs(
+    files: Iterable[str], dirs: Iterable[str]
+) -> Tuple[List[str], List[str]]:
+    """
+    Create dummy files and directories on the fly in the current directory.
+
+    Tests that contain filenames differing only by case should use this to
+    prepare a dir on the fly rather than including their fixtures in git and
+    the tarball. This is to work better with case insensitive file systems.
+    """
+    new_files = []
+    new_dirs = []
+
+    for dir_ in dirs:
+        path = Path(dir_)
+        if not path.exists():
+            path.mkdir()
+            new_dirs.append(dir_)
+    for file_ in files:
+        path = Path(file_)
+        if not path.exists():
+            path.touch()
+            new_files.append(file_)
+
+    return sorted(new_files), sorted(new_dirs)
 
 
 class TestUnitBase:
