@@ -6,3 +6,5 @@
 12-properly-handle-TERM-and-other-envvars.patch
 13-backport-support-for-python-9.patch
 14-backport-support-for-long-options-in-perltidy.patch
+15-find-exec.patch
+16-freecad-extension.patch
